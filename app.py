@@ -10,6 +10,8 @@ Two views:
      per-brand rollup ("most deceptive brands this month").
 """
 
+import os
+
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
@@ -355,12 +357,28 @@ def scrape_and_track_now(url: str):
     """Live-scrapes a URL the moment it's pasted and adds it to the tracked
     database as a new product with today's snapshot. Returns the product
     dict on success, or None if the scrape failed (blocked, invalid URL,
-    unsupported site, etc.)."""
+    unsupported site, etc.).
+
+    Uses the ScraperAPI proxy (via SCRAPERAPI_KEY) when available, since
+    Streamlit Cloud's servers get blocked by Amazon far more than a home
+    connection does. Falls back to a direct request if no key is
+    configured — works fine locally, may get blocked on cloud."""
     platform = guess_platform(url)
     if platform is None:
         return None, "Only Amazon.in and Flipkart URLs are supported."
 
-    data = scraper.scrape_product(url, platform)
+    # Streamlit Cloud stores secrets in st.secrets, not plain env vars —
+    # bridge it into an env var once so scraper.py (a plain module with no
+    # Streamlit dependency) can read it the same way locally or in the cloud.
+    # Wrapped in try/except because st.secrets raises if no secrets.toml
+    # exists at all, which is the normal case for a local run.
+    try:
+        if "SCRAPERAPI_KEY" in st.secrets and "SCRAPERAPI_KEY" not in os.environ:
+            os.environ["SCRAPERAPI_KEY"] = st.secrets["SCRAPERAPI_KEY"]
+    except Exception:
+        pass
+
+    data = scraper.scrape_product(url, platform, use_proxy=True)
     if data is None or data.get("price") is None:
         return None, ("Couldn't read this page — it may be blocking automated "
                        "requests, or the URL isn't a real product page.")
