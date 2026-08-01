@@ -1,0 +1,1 @@
+/opt/miniconda3/bin/python3: can't open file 'scraper.py': [Errno 1] Operation not permitted
