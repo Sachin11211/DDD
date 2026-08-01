@@ -149,7 +149,7 @@ def render_report_card(product: dict, history: pd.DataFrame):
 
     col1, col2 = st.columns([1, 2])
     with col1:
-        st.plotly_chart(trust_gauge(result["trust_score"], label), use_container_width=True)
+        st.plotly_chart(trust_gauge(result["trust_score"], label), use_container_width=True, key=f"compare_gauge_{pid}")
         st.caption(f"**{product['name']}**  \n{product['brand']} · {product['category']} · "
                    f"sold by {product['seller']}")
 
