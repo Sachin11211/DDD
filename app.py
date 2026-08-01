@@ -10,6 +10,8 @@ Two views:
      per-brand rollup ("most deceptive brands this month").
 """
 
+import os
+
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
@@ -87,32 +89,39 @@ def render_alert_banner(scores_df: pd.DataFrame):
 
 def trust_gauge(score: float, label: str):
     color = {"Trustworthy": "#2e7d32", "Caution": "#f9a825",
-             "Likely Deceptive": "#ef6c00", "Highly Deceptive": "#c62828"}[label]
+             "Likely Deceptive": "#ef6c00", "Highly Deceptive": "#e53935"}[label]
     fig = go.Figure(go.Indicator(
         mode="gauge+number",
         value=score,
-        title={"text": f"Trust Score — {label}"},
-        gauge={"axis": {"range": [0, 100]},
+        title={"text": f"Trust Score — {label}", "font": {"color": "#F5F5F5"}},
+        number={"font": {"color": "#F5F5F5"}},
+        gauge={"axis": {"range": [0, 100], "tickcolor": "#F5F5F5"},
                "bar": {"color": color},
+               "bgcolor": "#1F1F1F",
                "steps": [
-                   {"range": [0, 30], "color": "#ffebee"},
-                   {"range": [30, 55], "color": "#fff3e0"},
-                   {"range": [55, 80], "color": "#fffde7"},
-                   {"range": [80, 100], "color": "#e8f5e9"},
+                   {"range": [0, 30], "color": "#3a1f1f"},
+                   {"range": [30, 55], "color": "#3a2f1f"},
+                   {"range": [55, 80], "color": "#3a3a1f"},
+                   {"range": [80, 100], "color": "#1f3a24"},
                ]},
     ))
-    fig.update_layout(height=280, margin=dict(l=20, r=20, t=50, b=10))
+    fig.update_layout(height=280, margin=dict(l=20, r=20, t=50, b=10),
+                       paper_bgcolor="rgba(0,0,0,0)", font=dict(color="#F5F5F5"))
     return fig
 
 
 def price_mrp_chart(df: pd.DataFrame):
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=df["snapshot_date"], y=df["mrp"], name="MRP",
-                              line=dict(color="#c62828", dash="dot")))
+                              line=dict(color="#e53935", dash="dot")))
     fig.add_trace(go.Scatter(x=df["snapshot_date"], y=df["price"], name="Selling Price",
-                              line=dict(color="#1565c0"), fill="tonexty"))
+                              line=dict(color="#42a5f5"), fill="tonexty",
+                              fillcolor="rgba(66,165,245,0.15)"))
     fig.update_layout(height=350, margin=dict(l=20, r=20, t=30, b=10),
-                       legend=dict(orientation="h", y=1.1))
+                       legend=dict(orientation="h", y=1.1),
+                       paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                       font=dict(color="#F5F5F5"),
+                       xaxis=dict(gridcolor="#2A2A2A"), yaxis=dict(gridcolor="#2A2A2A"))
     return fig
 
 
@@ -277,7 +286,8 @@ def render_comparison(products: list):
         result = compute_trust_score(history)
         label = score_to_label(result["trust_score"])
         with col:
-            st.plotly_chart(trust_gauge(result["trust_score"], label), use_container_width=True)
+            st.plotly_chart(trust_gauge(result["trust_score"], label), use_container_width=True,
+                             key=f"compare_gauge_{pid}")
             st.caption(f"**{product['brand']} — {product['name']}**")
             st.metric("Days tracked", len(history))
             d = result["discount_mismatch"]
@@ -347,12 +357,28 @@ def scrape_and_track_now(url: str):
     """Live-scrapes a URL the moment it's pasted and adds it to the tracked
     database as a new product with today's snapshot. Returns the product
     dict on success, or None if the scrape failed (blocked, invalid URL,
-    unsupported site, etc.)."""
+    unsupported site, etc.).
+
+    Uses the ScraperAPI proxy (via SCRAPERAPI_KEY) when available, since
+    Streamlit Cloud's servers get blocked by Amazon far more than a home
+    connection does. Falls back to a direct request if no key is
+    configured — works fine locally, may get blocked on cloud."""
     platform = guess_platform(url)
     if platform is None:
         return None, "Only Amazon.in and Flipkart URLs are supported."
 
-    data = scraper.scrape_product(url, platform)
+    # Streamlit Cloud stores secrets in st.secrets, not plain env vars —
+    # bridge it into an env var once so scraper.py (a plain module with no
+    # Streamlit dependency) can read it the same way locally or in the cloud.
+    # Wrapped in try/except because st.secrets raises if no secrets.toml
+    # exists at all, which is the normal case for a local run.
+    try:
+        if "SCRAPERAPI_KEY" in st.secrets and "SCRAPERAPI_KEY" not in os.environ:
+            os.environ["SCRAPERAPI_KEY"] = st.secrets["SCRAPERAPI_KEY"]
+    except Exception:
+        pass
+
+    data = scraper.scrape_product(url, platform, use_proxy=True)
     if data is None or data.get("price") is None:
         return None, ("Couldn't read this page — it may be blocking automated "
                        "requests, or the URL isn't a real product page.")
@@ -422,6 +448,18 @@ def main():
         if history.empty:
             st.warning("No history yet for this product.")
         else:
+            with st.sidebar.expander("✏️ Edit category / brand", expanded=(product["category"] == "Uncategorized")):
+                new_category = st.text_input("Category", value=product["category"] or "",
+                                              key=f"cat_{product['id']}")
+                new_brand = st.text_input("Brand", value=product["brand"] or "",
+                                           key=f"brand_{product['id']}")
+                if st.button("Save", key=f"save_{product['id']}"):
+                    with db.get_conn() as conn:
+                        db.update_category_brand(conn, product["id"], new_category, new_brand)
+                    st.cache_data.clear()
+                    st.sidebar.success("Saved!")
+                    st.rerun()
+
             render_report_card(product, history)
 
     elif view == "Leaderboard":
