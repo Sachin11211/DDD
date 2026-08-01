@@ -16,6 +16,7 @@ IMPORTANT — read before running:
   need to change, only how the HTML is obtained.
 """
 
+import os
 import random
 import re
 import time
@@ -42,7 +43,39 @@ WEIGHT_PATTERN = re.compile(
 )
 
 
-def fetch_html(url: str) -> str | None:
+def fetch_html(url: str, use_proxy: bool = False) -> str | None:
+    """Fetches a page's HTML. By default uses a direct request (fine for
+    the daily bulk scrape, and for local runs from a home IP).
+
+    When use_proxy=True and a SCRAPERAPI_KEY is available (as an
+    environment variable), routes the request through ScraperAPI instead.
+    This exists specifically for the live 'paste a link' feature running
+    on Streamlit Cloud — cloud-hosted servers get blocked by Amazon far
+    more aggressively than home internet connections, since Amazon
+    blocklists known datacenter IP ranges. ScraperAPI's free tier
+    (1,000 credits/month, ~200 Amazon fetches after their 5x multiplier)
+    is enough for occasional single-product lookups, but nowhere near
+    enough for the daily 100+-product bulk scrape — which is exactly why
+    this is opt-in per call, not a global switch. The daily scrape should
+    keep using direct requests.
+    """
+    if use_proxy:
+        api_key = os.environ.get("SCRAPERAPI_KEY")
+        if api_key:
+            proxy_url = f"http://api.scraperapi.com?api_key={api_key}&url={url}"
+            try:
+                resp = requests.get(proxy_url, timeout=70)  # ScraperAPI can take up to ~60s
+                if resp.status_code != 200:
+                    print(f"[warn] ScraperAPI returned status {resp.status_code} for {url}")
+                    return None
+                return resp.text
+            except requests.RequestException as e:
+                print(f"[error] ScraperAPI fetch failed for {url}: {e}")
+                return None
+        else:
+            print("[warn] use_proxy=True but no SCRAPERAPI_KEY set — falling back to a "
+                  "direct request, which may get blocked from a cloud server.")
+
     headers = random.choice(REQUEST_HEADERS_POOL)
     try:
         resp = requests.get(url, headers=headers, timeout=15)
@@ -186,8 +219,8 @@ def _extract_flipkart(html: str) -> dict:
                 weight_value=weight_value, weight_unit=weight_unit)
 
 
-def scrape_product(url: str, platform: str) -> dict | None:
-    html = fetch_html(url)
+def scrape_product(url: str, platform: str, use_proxy: bool = False) -> dict | None:
+    html = fetch_html(url, use_proxy=use_proxy)
     if html is None:
         return None
     try:
