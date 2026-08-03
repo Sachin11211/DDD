@@ -116,6 +116,16 @@ def insert_snapshot(conn, product_id, snapshot_date, price, mrp,
     )
 
 
+def update_category_brand(conn, product_id, category, brand):
+    """Lets the person correct/fill in category and brand after the fact —
+    useful for products added via live paste, which don't get this info
+    from the Amazon page itself and default to 'Uncategorized'."""
+    conn.execute(
+        "UPDATE products SET category=?, brand=? WHERE id=?",
+        (category, brand, product_id),
+    )
+
+
 def get_product_by_url(conn, url):
     cur = conn.execute("SELECT * FROM products WHERE url = ?", (url,))
     return cur.fetchone()
