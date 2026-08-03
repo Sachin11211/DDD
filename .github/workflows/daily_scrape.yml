@@ -3,7 +3,7 @@ name: Daily Product Scrape
 on:
   schedule:
     # Runs at 3:00 AM UTC (~8:30 AM IST) every day
-    - cron: "0 3 * * *"
+    - cron: "30 3 * * *"
   workflow_dispatch: {}   # allows manual trigger from the Actions tab
 
 jobs:
